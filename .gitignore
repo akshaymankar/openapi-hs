@@ -1,0 +1,5 @@
+.stack-work/
+openapi-hs.cabal
+*~
+dist-newstyle/
+TAGS
