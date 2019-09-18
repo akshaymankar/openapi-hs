@@ -1,7 +1,14 @@
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DefaultSignatures    #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE DerivingVia          #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE KindSignatures       #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE RecordWildCards      #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE UndecidableInstances #-}
 module OpenAPI.Types where
 
 import Control.Applicative ((<|>))
@@ -9,8 +16,10 @@ import Data.Aeson          hiding (Encoding)
 import Data.Aeson.Types    hiding (Encoding)
 import Data.Char           (toLower)
 import Data.Map
+import Data.Proxy
 import Data.Text           hiding (toLower)
 import GHC.Generics
+import GHC.TypeLits
 
 import qualified Data.HashMap.Strict as HM
 
@@ -25,6 +34,7 @@ data OpenAPISpec = OpenAPISpec { specOpenapi      :: Text
                                , specExtensions   :: Extensions
                                }
                  deriving (Show, Eq, Generic)
+                 deriving (ToJSON, FromJSON) via Extensible "spec" OpenAPISpec
 
 data Info = Info { infoTitle          :: Text
                  , infoDescription    :: Maybe Text
@@ -35,6 +45,7 @@ data Info = Info { infoTitle          :: Text
                  , infoExtensions     :: Extensions
                  }
           deriving (Show, Eq, Generic)
+          deriving (ToJSON, FromJSON) via Extensible "info" Info
 
 data Contact = Contact { contactName       :: Maybe Text
                        , contactUrl        :: Maybe Text
@@ -42,12 +53,14 @@ data Contact = Contact { contactName       :: Maybe Text
                        , contactExtensions :: Extensions
                        }
                deriving (Show, Eq, Generic)
+               deriving (ToJSON, FromJSON) via Extensible "contact" Contact
 
 data License = License { licenseName       :: Text
                        , licenseUrl        :: Maybe Text
                        , licenseExtensions :: Extensions
                        }
                deriving (Show, Eq, Generic)
+               deriving (ToJSON, FromJSON) via Extensible "license" License
 
 data Server = Server { serverUrl         :: Text
                      , serverDescription :: Maybe Text
@@ -55,6 +68,7 @@ data Server = Server { serverUrl         :: Text
                      , serverExtensions  :: Extensions
                      }
             deriving (Show, Eq, Generic)
+            deriving (ToJSON, FromJSON) via Extensible "server" Server
 
 data ServerVariable = ServerVariable { variableEnum        :: Maybe [Text]
                                      , variableDefault     :: Text
@@ -62,6 +76,7 @@ data ServerVariable = ServerVariable { variableEnum        :: Maybe [Text]
                                      , variableExtensions  :: Extensions
                                      }
                     deriving (Show, Eq, Generic)
+                    deriving (ToJSON, FromJSON) via Extensible "variable" ServerVariable
 
 data Components =
   Components
@@ -71,16 +86,24 @@ data Components =
   , componentExamples        :: Maybe (Map Text (Referable Example))
   , componentRequestBodies   :: Maybe (Map Text (Referable RequestBody))
   , componentHeaders         :: Maybe (Map Text (Referable Header))
-  , componentSecuritySchemas :: Maybe (Map Text (Referable SecurityScheme))
+  , componentSecuritySchemes :: Maybe (Map Text (Referable SecurityScheme))
   , componentLinks           :: Maybe (Map Text (Referable Link))
   , componentCallbacks       :: Maybe (Map Text (Referable Callback))
   , componentExtensions      :: Extensions
   }
   deriving (Show, Eq, Generic)
+  deriving (ToJSON, FromJSON) via Extensible "component" Components
 
 -- Keys have to start with a /
-data Paths = Paths (Map Text PathItem)
+data Paths = Paths (HM.HashMap Text PathItem)
            deriving (Show, Eq, Generic)
+
+instance FromJSON Paths where
+  parseJSON = withObject "Paths"
+              $ \v -> Paths <$> (sequence $ HM.map parseJSON v)
+
+instance ToJSON Paths where
+  toJSON (Paths paths) = toJSON paths
 
 data PathItem = PathItem
                 { pathRef         :: Maybe Text
@@ -99,6 +122,7 @@ data PathItem = PathItem
                 , pathExtensions  :: Extensions
                 }
               deriving (Show, Eq, Generic)
+              deriving (ToJSON, FromJSON) via Extensible "path" PathItem
 
 data Operation = Operation
                  { operationTags        :: Maybe [Text]
@@ -116,12 +140,34 @@ data Operation = Operation
                  }
                deriving (Show, Eq, Generic)
 
+instance FromJSON Operation where
+  parseJSON =
+    withObject "Operation"
+    $ \v -> do
+        parsedOperationId <- v .:? "operationId"
+        operationWithoutId <- parseExtensibleJSON (prefixedOmitNothingJSONOptions "operation") (Object v)
+        pure $ operationWithoutId { operationId = parsedOperationId }
+
+instance ToJSON Operation where
+  toJSON operation =
+    let withWrongOperationId =
+          repackExtensions $ genericToJSON (prefixedOmitNothingJSONOptions "operation") operation
+    in case withWrongOperationId of
+            (Object o) ->
+              case HM.lookup "id" o of
+                Nothing -> (Object o)
+                Just opId -> Object
+                             $ HM.insert "operationId" opId
+                             $ HM.delete "id" o
+            _ -> error "impossible: toJSON of operation must be an Object"
+
 data ExternalDocs = ExternalDocs
                     { externalDocsDescription :: Maybe Text
                     , externalDocsUrl         :: Text
                     , externalDocsExtensions  :: Extensions
                     }
                   deriving (Show, Eq, Generic)
+                  deriving (ToJSON, FromJSON) via Extensible "spec" ExternalDocs
 
 data Parameter =
   Parameter
@@ -141,6 +187,7 @@ data Parameter =
   , parameterExtensions      :: Extensions
   }
   deriving (Show, Eq, Generic)
+  deriving (ToJSON, FromJSON) via Extensible "parameter" Parameter
 
 data ParameterIn = ParameterInQuery
                  | ParameterInHeader
@@ -148,12 +195,26 @@ data ParameterIn = ParameterInQuery
                  | ParameterInCookie
                  deriving (Show, Eq, Generic)
 
+instance FromJSON ParameterIn where
+  parseJSON (String "cookie") = pure $ ParameterInCookie
+  parseJSON (String "header") = pure $ ParameterInHeader
+  parseJSON (String "path")   = pure $ ParameterInPath
+  parseJSON (String "query")  = pure $ ParameterInQuery
+  parseJSON v = typeMismatch "expected cookie, header, path or query" v
+
+instance ToJSON ParameterIn where
+  toJSON ParameterInCookie = String "cookie"
+  toJSON ParameterInHeader = String "header"
+  toJSON ParameterInPath   = String "path"
+  toJSON ParameterInQuery  = String "query"
+
 data RequestBody = RequestBody
                    { requestBodyDescription :: Maybe Text
                    , requestBodyContent     :: Map Text MediaType
                    , requestBodyRequired    :: Maybe Bool
                    }
                  deriving (Show, Eq, Generic)
+                 deriving (ToJSON, FromJSON) via Extensible "requestBody" RequestBody
 
 data MediaType = MediaType
                  { mediaTypeSchema     :: Maybe (Referable Schema)
@@ -163,6 +224,7 @@ data MediaType = MediaType
                  , mediaTypeExtensions :: Extensions
                  }
                deriving (Show, Eq, Generic)
+               deriving (ToJSON, FromJSON) via Extensible "mediaType" MediaType
 
 data Encoding = Encoding
                 { encodingContentType   :: Maybe Text
@@ -173,6 +235,7 @@ data Encoding = Encoding
                 , encodingExtensions    :: Extensions
                 }
               deriving (Show, Eq, Generic)
+              deriving (ToJSON, FromJSON) via Extensible "encoding" Encoding
 
 data Responses = Responses
                  { responsesDefault    :: Maybe (Referable Response)
@@ -180,6 +243,26 @@ data Responses = Responses
                  , responsesExtensions :: Extensions
                  }
                deriving (Show, Eq, Generic)
+
+instance FromJSON Responses where
+  parseJSON =
+    withObject "Responses"
+    $ \v -> do
+        defaultResponses <- v .: "default" <|> pure Nothing
+        let exts = Extensions $ extractExtensions v
+            byStatusValues = HM.filterWithKey (\k _ -> (not $ "x-" `isPrefixOf` k) && k /= "default") v
+        byStatus <- sequence $ HM.map parseJSON byStatusValues
+        pure $ Responses defaultResponses byStatus exts
+
+instance ToJSON Responses where
+  toJSON Responses{..} =
+    let objectWithDefault =
+          case toJSON responsesDefault of
+            Null -> HM.empty
+            v    -> HM.singleton "default" v
+        objectWithByStatus = HM.map toJSON responseByStatus
+        exts = unExtensions responsesExtensions
+    in Object $ objectWithDefault `HM.union` objectWithByStatus `HM.union` exts
 
 data Response = Response
                 { responseDescription :: Text
@@ -189,12 +272,27 @@ data Response = Response
                 , responseExtensions  :: Extensions
                 }
               deriving (Show, Eq, Generic)
+              deriving (ToJSON, FromJSON) via Extensible "response" Response
 
 -- Keys are supposed to be expression
-data Callback = CallBack { callback           :: Map Text PathItem
+data Callback = Callback { callback           :: HM.HashMap Text PathItem
                          , callbackExtensions :: Extensions
                          }
               deriving (Show, Eq, Generic)
+
+instance FromJSON Callback where
+  parseJSON =
+    withObject "Callback"
+    $ \v -> do
+        let exts = Extensions $ extractExtensions v
+            callbackValues = HM.filterWithKey (\k _ -> not $ "x-" `isPrefixOf` k) v
+        callbackItems <- sequence $ HM.map parseJSON callbackValues
+        pure $ Callback callbackItems exts
+
+instance ToJSON Callback where
+  toJSON Callback{..} = let callbackMap = HM.map toJSON callback
+                            Extensions exts = callbackExtensions
+                        in Object (HM.union callbackMap exts)
 
 data Example = Example
                { exampleSummary       :: Maybe Text
@@ -204,6 +302,7 @@ data Example = Example
                , exampleExtensions    :: Extensions
                }
              deriving (Show, Eq, Generic)
+             deriving (ToJSON, FromJSON) via Extensible "example" Example
 
 -- Either one of operationId or operationRef are required
 -- The `Value` in parameters and request body are actually Any|Expression
@@ -217,6 +316,7 @@ data Link = Link
             , linkExtensions   :: Extensions
             }
           deriving (Show, Eq, Generic)
+          deriving (ToJSON, FromJSON) via Extensible "link" Link
 
 data Header = Header
               { headerDescription     :: Maybe Text
@@ -233,6 +333,7 @@ data Header = Header
               , headerExtensions      :: Extensions
               }
             deriving (Show, Eq, Generic)
+            deriving (ToJSON, FromJSON) via Extensible "header" Header
 
 data Tag = Tag
            { tagName         :: Text
@@ -241,6 +342,7 @@ data Tag = Tag
            , tagExtensions   :: Extensions
            }
          deriving (Show, Eq, Generic)
+         deriving (ToJSON, FromJSON) via Extensible "tag" Tag
 
 data Reference = Reference Text
                deriving (Show, Eq, Generic)
@@ -252,6 +354,10 @@ data Referable a = Refered Reference
 instance FromJSON a => FromJSON (Referable a) where
   parseJSON v = (Refered <$> parseJSON v)
                 <|> (NotRefered <$> parseJSON v)
+
+instance ToJSON a => ToJSON (Referable a) where
+  toJSON (Refered (Reference ref)) = object [ "$ref" .= ref ]
+  toJSON (NotRefered x)            = toJSON x
 
 data Schema = Schema
               { schemaTitle                :: Maybe Text
@@ -292,6 +398,7 @@ data Schema = Schema
               , schemaExtensions           :: Extensions
               }
             deriving (Show, Eq, Generic)
+            deriving (ToJSON, FromJSON) via Extensible "schema" Schema
 
 data BoolOr a = IsBool Bool
               | IsNotBool a
@@ -301,11 +408,21 @@ instance FromJSON a => FromJSON (BoolOr a) where
   parseJSON (Bool b) = pure $ IsBool b
   parseJSON v        = IsNotBool <$> parseJSON v
 
+instance ToJSON a => ToJSON (BoolOr a) where
+  toJSON (IsBool b)    = toJSON b
+  toJSON (IsNotBool a) = toJSON a
+
 data Discriminator = Discriminator
                      { discriminatorPropertyName :: Text
                      , discriminatorMapping      :: Maybe (Map Text Text)
                      }
                    deriving (Show, Eq, Generic)
+
+instance FromJSON Discriminator where
+  parseJSON = genericParseJSON $ prefixedOmitNothingJSONOptions "discriminator"
+
+instance ToJSON Discriminator where
+  toJSON = genericToJSON $ prefixedOmitNothingJSONOptions "discriminator"
 
 data XML = XML { xmlName       :: Maybe Text
                , xmlNamespace  :: Maybe Text
@@ -315,6 +432,7 @@ data XML = XML { xmlName       :: Maybe Text
                , xmlExtensions :: Extensions
                }
          deriving (Show, Eq, Generic)
+         deriving (ToJSON, FromJSON) via Extensible "xml" XML
 
 -- Use `type` to determine which one of these to parse
 data SecurityScheme = APIKeySS APIKeySecurityScheme
@@ -322,148 +440,6 @@ data SecurityScheme = APIKeySS APIKeySecurityScheme
                     | OAuthSS OAuthSecurityScheme
                     | OpenIdConnectSS OpenIdConnectSecurityScheme
                     deriving (Show, Eq, Generic)
-
-data APIKeySecurityScheme = APIKeySecurityScheme
-                            { apiKeyDescription :: Maybe Text
-                            , apiKeyName        :: Text
-                            , apiKeyIn          :: APIKeySecuritySchemeIn
-                            , apiKeyExtensions  :: Extensions
-                            }
-                          deriving (Show, Eq, Generic)
-
-data APIKeySecuritySchemeIn = APIKeySecuritySchemeInQuery
-                            | APIKeySecuritySchemeInHeader
-                            | APIKeySecuritySchemeInCookie
-                            deriving (Show, Eq, Generic)
-
-data HTTPSecurityScheme = HTTPSecurityScheme
-                          { httpScheme       :: Text
-                          , httpBearerFormat :: Maybe Text
-                          , httpExtensions   :: Extensions
-                          }
-                        deriving (Show, Eq, Generic)
-
-data OAuthSecurityScheme = OAuthSecurityScheme
-                           { oauthFlows :: OAuthFlows }
-                         deriving (Show, Eq, Generic)
-
-data OAuthFlows = OAuthFlows
-                  { oauthFlowsImplicit          :: Maybe OAuthFlow
-                  , oauthFlowsPassword          :: Maybe OAuthFlow
-                  , oauthFlowsClientCredentials :: Maybe OAuthFlow
-                  , oauthFlowsAuthorizationCode :: Maybe OAuthFlow
-                  , oauthFlowsExtensions        :: Extensions
-                  }
-                deriving (Show, Eq, Generic)
-
-data OAuthFlow = OAuthFlow
-                 { oauthFlowAuthorizationUrl :: Text
-                 , oauthFlowTokenUrl         :: Text
-                 , oauthFlowRefershUrl       :: Maybe Text
-                 , oauthFlowScopes           :: Map Text Text
-                 , oauthFlowExtensions       :: Extensions
-                 }
-               deriving (Show, Eq, Generic)
-
-data OpenIdConnectSecurityScheme = OpenIdConnectSecurityScheme
-                                   { openIdConnectUrl :: Text }
-                                 deriving (Show, Eq, Generic)
-
-data SecurityRequirement = SecurityRequirements (Map Text [Text])
-                         deriving (Show, Eq, Generic)
-data Extensions = Extensions (HM.HashMap Text Value)
-                deriving (Show, Eq, Generic)
-
-instance FromJSON Extensions where
-  parseJSON (Object o) = pure $ Extensions o
-  parseJSON v          = typeMismatch "Object" v
-
-instance FromJSON OpenAPISpec where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "spec"
-
-instance FromJSON Info where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "info"
-
-instance FromJSON Contact where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "contact"
-
-instance FromJSON License where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "license"
-
-instance FromJSON Server where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "server"
-
-instance FromJSON ServerVariable where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "serverVariable"
-
-instance FromJSON Components where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "component"
-
-instance FromJSON Paths where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "paths"
-
-instance FromJSON PathItem where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "path"
-
-instance FromJSON Operation where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "operation"
-
-instance FromJSON ExternalDocs where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "externalDocs"
-
-instance FromJSON Parameter where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "parameter"
-
-instance FromJSON RequestBody where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "requestBody"
-
-instance FromJSON MediaType where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "mediaType"
-
-instance FromJSON Encoding where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "encoding"
-
-instance FromJSON Responses where
-  parseJSON =
-    withObject "Responses"
-    $ \v -> do
-        defaultResponses <- v .: "default" <|> pure Nothing
-        byStatus <- parseJSON $ Object v
-        let exts = extractExtensions v
-        pure $ Responses defaultResponses byStatus (Extensions exts)
-
-instance FromJSON Response where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "response"
-
-instance FromJSON Callback where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "callback"
-
-instance FromJSON Example where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "example"
-
-instance FromJSON Link where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "link"
-
-instance FromJSON Header where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "header"
-
-instance FromJSON Tag where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "tag"
-
-instance FromJSON Reference where
-  parseJSON (Object o) = case HM.lookup "$ref" o of
-                           Just (String ref) -> pure $ Reference ref
-                           _ -> fail "expected to find $ref in Object"
-  parseJSON v = typeMismatch "Object" v
-
-instance FromJSON Schema where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "schema"
-
-instance FromJSON Discriminator where
-  parseJSON = genericParseJSON defaultOptions
-
-instance FromJSON XML where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "xml"
 
 instance FromJSON SecurityScheme where
   parseJSON =
@@ -477,26 +453,31 @@ instance FromJSON SecurityScheme where
         "openIdConnect" -> OpenIdConnectSS <$> parseJSON (Object v)
         invalid -> fail $ "Not a valid security scheme type: " ++ invalid
 
-instance FromJSON OAuthSecurityScheme where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "oauth"
+instance ToJSON SecurityScheme where
+  toJSON (APIKeySS scheme)        = addType scheme "apiKey"
+  toJSON (HTTP_SS scheme)         = addType scheme "http"
+  toJSON (OAuthSS scheme)         = addType scheme "oauth2"
+  toJSON (OpenIdConnectSS scheme) = addType scheme "openIdConnect"
 
-instance FromJSON HTTPSecurityScheme where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "http"
+addType :: ToJSON a => a -> Text -> Value
+addType scheme t =
+  case toJSON scheme of
+    (Object o) -> Object $ HM.union o (HM.singleton "type" (String t))
+    _          -> error "impossible: cannot add type to non object"
 
-instance FromJSON APIKeySecurityScheme where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "apiKey"
+data APIKeySecurityScheme = APIKeySecurityScheme
+                            { apiKeyDescription :: Maybe Text
+                            , apiKeyName        :: Text
+                            , apiKeyIn          :: APIKeySecuritySchemeIn
+                            , apiKeyExtensions  :: Extensions
+                            }
+                          deriving (Show, Eq, Generic)
+                          deriving (ToJSON, FromJSON) via Extensible "apiKey" APIKeySecurityScheme
 
-instance FromJSON OpenIdConnectSecurityScheme where
-  parseJSON = parseExtensibleJSON defaultOptions
-
-instance FromJSON OAuthFlows where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "oauthFlows"
-
-instance FromJSON OAuthFlow where
-  parseJSON = parseExtensibleJSON $ optsParseWithoutPrefix "oauthFlow"
-
-instance FromJSON SecurityRequirement where
-  parseJSON = fmap SecurityRequirements . parseJSON
+data APIKeySecuritySchemeIn = APIKeySecuritySchemeInQuery
+                            | APIKeySecuritySchemeInHeader
+                            | APIKeySecuritySchemeInCookie
+                            deriving (Show, Eq, Generic)
 
 instance FromJSON APIKeySecuritySchemeIn where
   parseJSON (String "cookie") = pure $ APIKeySecuritySchemeInCookie
@@ -504,15 +485,110 @@ instance FromJSON APIKeySecuritySchemeIn where
   parseJSON (String "query")  = pure $ APIKeySecuritySchemeInQuery
   parseJSON v = typeMismatch "expected cookie, header or query" v
 
-instance FromJSON ParameterIn where
-  parseJSON (String "cookie") = pure $ ParameterInCookie
-  parseJSON (String "header") = pure $ ParameterInHeader
-  parseJSON (String "path")   = pure $ ParameterInPath
-  parseJSON (String "query")  = pure $ ParameterInQuery
-  parseJSON v = typeMismatch "expected cookie, header, path or query" v
+instance ToJSON APIKeySecuritySchemeIn where
+  toJSON APIKeySecuritySchemeInCookie = String "cookie"
+  toJSON APIKeySecuritySchemeInHeader = String "header"
+  toJSON APIKeySecuritySchemeInQuery  = String "query"
 
-optsParseWithoutPrefix :: String -> Options
-optsParseWithoutPrefix prefix = defaultOptions { fieldLabelModifier = removePrefix prefix }
+data HTTPSecurityScheme = HTTPSecurityScheme
+                          { httpScheme       :: Text
+                          , httpBearerFormat :: Maybe Text
+                          , httpExtensions   :: Extensions
+                          }
+                        deriving (Show, Eq, Generic)
+                        deriving (ToJSON, FromJSON) via Extensible "http" HTTPSecurityScheme
+
+data OAuthSecurityScheme = OAuthSecurityScheme
+                           { oauthFlows :: OAuthFlows }
+                         deriving (Show, Eq, Generic)
+                         deriving (ToJSON, FromJSON) via Extensible "oauth" OAuthSecurityScheme -- Not really extensible
+
+data OAuthFlows = OAuthFlows
+                  { oauthFlowsImplicit          :: Maybe OAuthFlow
+                  , oauthFlowsPassword          :: Maybe OAuthFlow
+                  , oauthFlowsClientCredentials :: Maybe OAuthFlow
+                  , oauthFlowsAuthorizationCode :: Maybe OAuthFlow
+                  , oauthFlowsExtensions        :: Extensions
+                  }
+                deriving (Show, Eq, Generic)
+                deriving (ToJSON, FromJSON) via Extensible "oauthFlows" OAuthFlows
+
+data OAuthFlow = OAuthFlow
+                 { oauthFlowAuthorizationUrl :: Text
+                 , oauthFlowTokenUrl         :: Text
+                 , oauthFlowRefershUrl       :: Maybe Text
+                 , oauthFlowScopes           :: Map Text Text
+                 , oauthFlowExtensions       :: Extensions
+                 }
+               deriving (Show, Eq, Generic)
+               deriving (ToJSON, FromJSON) via Extensible "oauthFlow" OAuthFlow
+
+data OpenIdConnectSecurityScheme = OpenIdConnectSecurityScheme
+                                   { openIdConnectUrl :: Text }
+                                 deriving (Show, Eq, Generic)
+
+instance FromJSON OpenIdConnectSecurityScheme where
+  parseJSON = genericParseJSON omitNothingJSONOptions
+
+instance ToJSON OpenIdConnectSecurityScheme where
+  toJSON = genericToJSON omitNothingJSONOptions
+
+data SecurityRequirement = SecurityRequirements (Map Text [Text])
+                         deriving (Show, Eq, Generic)
+
+instance FromJSON SecurityRequirement where
+  parseJSON = fmap SecurityRequirements . parseJSON
+
+instance ToJSON SecurityRequirement where
+  toJSON (SecurityRequirements reqs) = toJSON reqs
+
+data Extensions = Extensions { unExtensions :: HM.HashMap Text Value }
+                deriving (Show, Eq, Generic)
+
+instance FromJSON Extensions where
+  parseJSON (Object o) = pure $ Extensions o
+  parseJSON v          = typeMismatch "Object" v
+
+instance ToJSON Extensions where
+  toJSON (Extensions m) = Object m
+
+instance FromJSON Reference where
+  parseJSON (Object o) = case HM.lookup "$ref" o of
+                           Just (String ref) -> pure $ Reference ref
+                           _ -> fail "expected to find $ref in Object"
+  parseJSON v = typeMismatch "Object" v
+
+newtype Extensible (prefix :: Symbol) a = Extensible a
+
+instance (Generic a, GToJSON Zero (Rep a), KnownSymbol prefix) => ToJSON (Extensible prefix a) where
+  toJSON (Extensible a) =
+    repackExtensions $ genericToJSON (prefixedOmitNothingJSONOptions $ (symbolVal (Proxy :: Proxy prefix))) a
+
+instance (Generic a, GFromJSON Zero (Rep a), KnownSymbol prefix) => FromJSON (Extensible prefix a) where
+  parseJSON =
+    withObject "Extensions"
+    $ \v ->
+        let opts = prefixedOmitNothingJSONOptions (symbolVal (Proxy :: Proxy prefix))
+        in Extensible <$> parseExtensibleJSON opts (Object v)
+
+repackExtensions :: Value -> Value
+repackExtensions (Object input) =
+  case HM.lookup "extensions" input of
+    Just (Object exts) ->
+      let withoutExts = HM.delete "extensions" input
+      in Object $ HM.union withoutExts exts
+    _ -> (Object input)
+repackExtensions x = x
+
+omitNothingJSONOptions :: Options
+omitNothingJSONOptions =
+  defaultOptions { omitNothingFields = True }
+
+prefixedOmitNothingJSONOptions :: String -> Options
+prefixedOmitNothingJSONOptions prefix =
+  defaultOptions { fieldLabelModifier = removePrefix prefix
+                 , omitNothingFields  = True
+                 }
 
 removePrefix :: String -> String -> String
 removePrefix prefix input = maybe input id $ go prefix input
