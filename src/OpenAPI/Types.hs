@@ -17,6 +17,7 @@ import Data.Aeson hiding (Encoding)
 import Data.Aeson.Types hiding (Encoding)
 import Data.Char (toLower)
 import qualified Data.HashMap.Strict as HM
+import Data.HashMap.Strict (HashMap)
 import Data.Proxy
 import Data.Text hiding (toLower)
 import GHC.Generics
@@ -73,7 +74,7 @@ data Server
   = Server
       { serverUrl :: Text,
         serverDescription :: Maybe Text,
-        serverVariables :: Maybe (HM.HashMap Text ServerVariable),
+        serverVariables :: Maybe (HashMap Text ServerVariable),
         serverExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -91,22 +92,22 @@ data ServerVariable
 
 data Components
   = Components
-      { componentSchemas :: Maybe (HM.HashMap Text (Referable Schema)),
-        componentResponses :: Maybe (HM.HashMap Text (Referable Response)),
-        componentParameters :: Maybe (HM.HashMap Text (Referable Parameter)),
-        componentExamples :: Maybe (HM.HashMap Text (Referable Example)),
-        componentRequestBodies :: Maybe (HM.HashMap Text (Referable RequestBody)),
-        componentHeaders :: Maybe (HM.HashMap Text (Referable Header)),
-        componentSecuritySchemes :: Maybe (HM.HashMap Text (Referable SecurityScheme)),
-        componentLinks :: Maybe (HM.HashMap Text (Referable Link)),
-        componentCallbacks :: Maybe (HM.HashMap Text (Referable Callback)),
+      { componentSchemas :: Maybe (HashMap Text (Referable Schema)),
+        componentResponses :: Maybe (HashMap Text (Referable Response)),
+        componentParameters :: Maybe (HashMap Text (Referable Parameter)),
+        componentExamples :: Maybe (HashMap Text (Referable Example)),
+        componentRequestBodies :: Maybe (HashMap Text (Referable RequestBody)),
+        componentHeaders :: Maybe (HashMap Text (Referable Header)),
+        componentSecuritySchemes :: Maybe (HashMap Text (Referable SecurityScheme)),
+        componentLinks :: Maybe (HashMap Text (Referable Link)),
+        componentCallbacks :: Maybe (HashMap Text (Referable Callback)),
         componentExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via Extensible "component" Components
 
 -- Keys have to start with a /
-data Paths = Paths (HM.HashMap Text PathItem)
+data Paths = Paths (HashMap Text PathItem)
   deriving (Show, Eq, Generic)
 
 instance FromJSON Paths where
@@ -145,7 +146,7 @@ data Operation
         operationParameters :: Maybe [Referable Parameter],
         operationRequestBody :: Maybe (Referable RequestBody),
         operationResponses :: Responses,
-        operationCallbacks :: Maybe (HM.HashMap Text (Referable Callback)),
+        operationCallbacks :: Maybe (HashMap Text (Referable Callback)),
         operationDeprecated :: Maybe Bool,
         operationSecurity :: Maybe [SecurityRequirement],
         operationServers :: Maybe [Server],
@@ -200,8 +201,8 @@ data Parameter
         parameterAllowReserved :: Maybe Bool,
         parameterSchema :: Maybe (Referable Schema),
         parameterExample :: Maybe Value,
-        parameterExamples :: Maybe (HM.HashMap Text (Referable Example)),
-        parameterContent :: Maybe (HM.HashMap Text MediaType),
+        parameterExamples :: Maybe (HashMap Text (Referable Example)),
+        parameterContent :: Maybe (HashMap Text MediaType),
         parameterExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -230,7 +231,7 @@ instance ToJSON ParameterIn where
 data RequestBody
   = RequestBody
       { requestBodyDescription :: Maybe Text,
-        requestBodyContent :: HM.HashMap Text MediaType,
+        requestBodyContent :: HashMap Text MediaType,
         requestBodyRequired :: Maybe Bool
       }
   deriving (Show, Eq, Generic)
@@ -240,8 +241,8 @@ data MediaType
   = MediaType
       { mediaTypeSchema :: Maybe (Referable Schema),
         mediaTypeExample :: Maybe Value,
-        mediaTypeExamples :: Maybe (HM.HashMap Text (Referable Example)),
-        mediaTypeEncoding :: Maybe (HM.HashMap Text Encoding),
+        mediaTypeExamples :: Maybe (HashMap Text (Referable Example)),
+        mediaTypeEncoding :: Maybe (HashMap Text Encoding),
         mediaTypeExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -250,7 +251,7 @@ data MediaType
 data Encoding
   = Encoding
       { encodingContentType :: Maybe Text,
-        encodingHeaders :: Maybe (HM.HashMap Text (Referable Header)),
+        encodingHeaders :: Maybe (HashMap Text (Referable Header)),
         encodingStyle :: Maybe Text,
         encodingExplode :: Maybe Bool,
         encodingAllowReserved :: Maybe Bool,
@@ -262,7 +263,7 @@ data Encoding
 data Responses
   = Responses
       { responsesDefault :: Maybe (Referable Response),
-        responseByStatus :: HM.HashMap Text (Referable Response),
+        responseByStatus :: HashMap Text (Referable Response),
         responsesExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -290,9 +291,9 @@ instance ToJSON Responses where
 data Response
   = Response
       { responseDescription :: Text,
-        responseHeaders :: Maybe (HM.HashMap Text (Referable Header)),
-        responseContent :: Maybe (HM.HashMap Text MediaType),
-        responseLinks :: Maybe (HM.HashMap Text (Referable Link)),
+        responseHeaders :: Maybe (HashMap Text (Referable Header)),
+        responseContent :: Maybe (HashMap Text MediaType),
+        responseLinks :: Maybe (HashMap Text (Referable Link)),
         responseExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -301,7 +302,7 @@ data Response
 -- Keys are supposed to be expression
 data Callback
   = Callback
-      { callback :: HM.HashMap Text PathItem,
+      { callback :: HashMap Text PathItem,
         callbackExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -338,7 +339,7 @@ data Link
   = Link
       { linkOperationId :: Maybe Text,
         linkOperationRef :: Maybe Text,
-        linkParameters :: Maybe (HM.HashMap Text Value),
+        linkParameters :: Maybe (HashMap Text Value),
         linkRequestBody :: Maybe Value,
         linkDescription :: Maybe Text,
         linkServer :: Maybe Server,
@@ -358,8 +359,8 @@ data Header
         headerAllowReserved :: Maybe Bool,
         headerSchema :: Maybe (Referable Schema),
         headerExample :: Maybe Value,
-        headerExamples :: Maybe (HM.HashMap Text (Referable Example)),
-        headerContent :: Maybe (HM.HashMap Text MediaType),
+        headerExamples :: Maybe (HashMap Text (Referable Example)),
+        headerContent :: Maybe (HashMap Text MediaType),
         headerExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -416,7 +417,7 @@ data Schema
         schemaAnyOf :: Maybe (Referable Schema),
         schemaNot :: Maybe (Referable Schema),
         schemaItems :: Maybe (Referable Schema),
-        schemaProperties :: Maybe (HM.HashMap Text (Referable Schema)),
+        schemaProperties :: Maybe (HashMap Text (Referable Schema)),
         schemaAdditionalProperties :: Maybe (BoolOr (Referable Schema)), -- Should be Bool or schema
         schemaDescription :: Maybe Text,
         schemaFormat :: Maybe Text,
@@ -450,7 +451,7 @@ instance ToJSON a => ToJSON (BoolOr a) where
 data Discriminator
   = Discriminator
       { discriminatorPropertyName :: Text,
-        discriminatorMapping :: Maybe (HM.HashMap Text Text)
+        discriminatorMapping :: Maybe (HashMap Text Text)
       }
   deriving (Show, Eq, Generic)
 
@@ -562,7 +563,7 @@ data OAuthFlow
       { oauthFlowAuthorizationUrl :: Text,
         oauthFlowTokenUrl :: Text,
         oauthFlowRefershUrl :: Maybe Text,
-        oauthFlowScopes :: HM.HashMap Text Text,
+        oauthFlowScopes :: HashMap Text Text,
         oauthFlowExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -579,7 +580,7 @@ instance FromJSON OpenIdConnectSecurityScheme where
 instance ToJSON OpenIdConnectSecurityScheme where
   toJSON = genericToJSON omitNothingJSONOptions
 
-data SecurityRequirement = SecurityRequirements (HM.HashMap Text [Text])
+data SecurityRequirement = SecurityRequirements (HashMap Text [Text])
   deriving (Show, Eq, Generic)
 
 instance FromJSON SecurityRequirement where
@@ -588,7 +589,7 @@ instance FromJSON SecurityRequirement where
 instance ToJSON SecurityRequirement where
   toJSON (SecurityRequirements reqs) = toJSON reqs
 
-data Extensions = Extensions {unExtensions :: HM.HashMap Text Value}
+data Extensions = Extensions {unExtensions :: HashMap Text Value}
   deriving (Show, Eq, Generic)
 
 instance FromJSON Extensions where
@@ -644,13 +645,13 @@ removePrefix prefix input = maybe input id $ go prefix input
         then go remainingPrefix remainingInput
         else Nothing
 
-parseExtensibleJSON :: 
-  (Generic a, GFromJSON Zero (Rep a)) => Options -> Value -> Parser a
+parseExtensibleJSON
+  :: (Generic a, GFromJSON Zero (Rep a)) => Options -> Value -> Parser a
 parseExtensibleJSON opts = do
   withObject "Extensible"
   $ \v ->
     let exts = extractExtensions v
      in genericParseJSON opts (Object $ HM.insert "extensions" (Object exts) v)
 
-extractExtensions :: HM.HashMap Text Value -> HM.HashMap Text Value
+extractExtensions :: HashMap Text Value -> HashMap Text Value
 extractExtensions = HM.filterWithKey (\k _ -> "x-" `isPrefixOf` k)
