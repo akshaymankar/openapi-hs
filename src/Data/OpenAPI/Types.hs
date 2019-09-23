@@ -10,7 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module OpenAPI.Types where
+module Data.OpenAPI.Types where
 
 import Control.Applicative ((<|>))
 import Data.Aeson hiding (Encoding)
