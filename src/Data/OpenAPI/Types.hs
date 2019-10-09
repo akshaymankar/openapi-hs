@@ -96,18 +96,20 @@ data ServerVariable
   deriving (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via Extensible "variable" ServerVariable
 
+type Definitions = HashMap Text
+
 -- | Holds a set of reusable objects for different aspects of the OAS. All objects defined within the components object will have no effect on the API unless they are explicitly referenced from properties outside the components object.
 data Components
   = Components
-      { componentSchemas :: Maybe (HashMap Text (Referable Schema)),
-        componentResponses :: Maybe (HashMap Text (Referable Response)),
-        componentParameters :: Maybe (HashMap Text (Referable Parameter)),
-        componentExamples :: Maybe (HashMap Text (Referable Example)),
-        componentRequestBodies :: Maybe (HashMap Text (Referable RequestBody)),
-        componentHeaders :: Maybe (HashMap Text (Referable Header)),
-        componentSecuritySchemes :: Maybe (HashMap Text (Referable SecurityScheme)),
-        componentLinks :: Maybe (HashMap Text (Referable Link)),
-        componentCallbacks :: Maybe (HashMap Text (Referable Callback)),
+      { componentSchemas :: Maybe (Definitions (Referable Schema)),
+        componentResponses :: Maybe (Definitions (Referable Response)),
+        componentParameters :: Maybe (Definitions (Referable Parameter)),
+        componentExamples :: Maybe (Definitions (Referable Example)),
+        componentRequestBodies :: Maybe (Definitions (Referable RequestBody)),
+        componentHeaders :: Maybe (Definitions (Referable Header)),
+        componentSecuritySchemes :: Maybe (Definitions (Referable SecurityScheme)),
+        componentLinks :: Maybe (Definitions (Referable Link)),
+        componentCallbacks :: Maybe (Definitions (Referable Callback)),
         componentExtensions :: Extensions
       }
   deriving (Show, Eq, Generic)
@@ -430,14 +432,43 @@ instance ToJSON a => ToJSON (Referable a) where
   toJSON (Refered (Reference ref)) = object ["$ref" .= ref]
   toJSON (NotRefered x) = toJSON x
 
+data SchemaType
+  = SchemaTypeNull
+  | SchemaTypeBoolean
+  | SchemaTypeObject
+  | SchemaTypeArray
+  | SchemaTypeNumber
+  | SchemaTypeInteger
+  | SchemaTypeString
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SchemaType where
+  toJSON SchemaTypeNull = "null"
+  toJSON SchemaTypeBoolean = "boolean"
+  toJSON SchemaTypeObject = "object"
+  toJSON SchemaTypeArray = "array"
+  toJSON SchemaTypeNumber = "number"
+  toJSON SchemaTypeInteger = "integer"
+  toJSON SchemaTypeString = "string"
+
+instance FromJSON SchemaType where
+  parseJSON (String "null") = pure SchemaTypeNull
+  parseJSON (String "boolean") = pure SchemaTypeBoolean
+  parseJSON (String "object") = pure SchemaTypeObject
+  parseJSON (String "array") = pure SchemaTypeArray
+  parseJSON (String "number") = pure SchemaTypeNumber
+  parseJSON (String "integer") = pure SchemaTypeInteger
+  parseJSON (String "string") = pure SchemaTypeString
+  parseJSON _ = fail "SchemaType can only be one of null, object, boolean, array, number, integer or string"
+
 -- | The Schema Object allows the definition of input and output data types. These types can be objects, but also primitives and arrays. This object is an extended subset of the [JSON Schema Specification Wright Draft 00](http://json-schema.org/).
 data Schema
   = Schema
       { schemaTitle :: Maybe Text,
         schemaMultipleOf :: Maybe Int,
-        schemaMaximum :: Maybe Int,
+        schemaMaximum :: Maybe Integer,
         schemaExclusiveMaximum :: Maybe Bool,
-        schemaMinimum :: Maybe Int,
+        schemaMinimum :: Maybe Integer,
         schemaExclusiveMinimum :: Maybe Bool,
         schemaMaxLength :: Maybe Int,
         schemaMinLength :: Maybe Int,
@@ -449,7 +480,7 @@ data Schema
         schemaMinProperties :: Maybe Int,
         schemaRequired :: Maybe [Text],
         schemaEnum :: Maybe [Value],
-        schemaType :: Maybe Text,
+        schemaType :: Maybe SchemaType,
         schemaAllOf :: Maybe (Referable Schema),
         schemaOneOf :: Maybe (Referable Schema),
         schemaAnyOf :: Maybe (Referable Schema),
